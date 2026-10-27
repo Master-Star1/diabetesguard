@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">DiabetesGuard</string>
+    <string name="title_activity_main">DiabetesGuard</string>
+    <string name="package_name">de.diabetesguard.app</string>
+    <string name="custom_url_scheme">de.diabetesguard.app</string>
+</resources>

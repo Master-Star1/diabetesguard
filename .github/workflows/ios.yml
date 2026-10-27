@@ -1,0 +1,99 @@
+# Baut die iOS-App auf einem macOS-Runner von GitHub (Xcode vorinstalliert).
+#
+# • Manuell starten (Actions → "iOS Build" → Run workflow): unsignierter Build als
+#   Kompilier-Test – braucht KEIN Apple-Konto und beweist, dass das Xcode-Projekt baut.
+# • Mit App-Store-Secrets: signiertes .ipa und Upload zu TestFlight.
+#
+# macOS-Minuten kosten das 10-fache von Linux – deshalb nicht bei jedem Push.
+#
+# Secrets für den TestFlight-Upload (Settings → Secrets → Actions):
+#   APPLE_CERT_P12_BASE64      = Distribution-Zertifikat (.p12) base64-kodiert
+#   APPLE_CERT_PASSWORD        = Passwort des .p12
+#   APPLE_PROVISION_BASE64     = App-Store-Provisioning-Profil (.mobileprovision) base64
+#   APPSTORE_KEY_ID            = App Store Connect API Key ID
+#   APPSTORE_ISSUER_ID         = App Store Connect Issuer ID
+#   APPSTORE_KEY_P8_BASE64     = API-Key (.p8) base64
+#   APPLE_TEAM_ID              = 10-stellige Team-ID
+name: iOS Build
+
+on:
+  # Automatisch nur, wenn sich das iOS-Projekt oder dieser Workflow ändert
+  # (macOS-Minuten sind teuer) – sonst manuell über "Run workflow".
+  push:
+    branches: [main, master, "claude/**"]
+    paths: ["ios/**", "capacitor.config.ts", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+    inputs:
+      upload_testflight:
+        description: "Signieren und zu TestFlight hochladen (Secrets nötig)"
+        type: boolean
+        default: false
+
+jobs:
+  ios:
+    runs-on: macos-15
+    env:
+      SIGNED: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_testflight && secrets.APPLE_CERT_P12_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: package-lock.json }
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync ios
+
+      - name: Unsignierter Build (Kompilier-Test)
+        if: env.SIGNED != 'true'
+        run: |
+          cd ios/App
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | tail -30
+          echo "✅ iOS-Projekt kompiliert"
+
+      - name: Zertifikat & Profil installieren
+        if: env.SIGNED == 'true'
+        run: |
+          echo "${{ secrets.APPLE_CERT_P12_BASE64 }}" | base64 -d > cert.p12
+          echo "${{ secrets.APPLE_PROVISION_BASE64 }}" | base64 -d > profile.mobileprovision
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import cert.p12 -k build.keychain -P "${{ secrets.APPLE_CERT_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "${{ secrets.APPSTORE_KEY_P8_BASE64 }}" | base64 -d > ~/.appstoreconnect/private_keys/AuthKey_${{ secrets.APPSTORE_KEY_ID }}.p8
+
+      - name: Archivieren, exportieren, hochladen
+        if: env.SIGNED == 'true'
+        run: |
+          cd ios/App
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/App.xcarchive \
+            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} archive | tail -20
+          cat > ExportOptions.plist << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${{ secrets.APPLE_TEAM_ID }}</string>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath build/App.xcarchive \
+            -exportOptionsPlist ExportOptions.plist -exportPath build/export | tail -10
+          xcrun altool --upload-app -f build/export/App.ipa -t ios \
+            --apiKey ${{ secrets.APPSTORE_KEY_ID }} --apiIssuer ${{ secrets.APPSTORE_ISSUER_ID }}
+          echo "✅ Zu TestFlight hochgeladen"
+
+      - uses: actions/upload-artifact@v4
+        if: env.SIGNED == 'true'
+        with:
+          name: DiabetesGuard-ios-ipa
+          path: ios/App/build/export/App.ipa
+
+      - name: Aufräumen
+        if: always()
+        run: rm -f cert.p12 profile.mobileprovision; security delete-keychain build.keychain 2>/dev/null || true

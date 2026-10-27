@@ -1,0 +1,81 @@
+# Baut die Android-App auf GitHubs Servern (Android SDK ist dort vorinstalliert).
+#
+# • Jeder Push:  Debug-APK zum Testen auf dem eigenen Handy → "Artifacts" im Workflow-Lauf
+# • Mit Secrets: zusätzlich signiertes Release-Bundle (.aab) für den Play Store
+#
+# Secrets anlegen unter Repo → Settings → Secrets and variables → Actions:
+#   KEYSTORE_BASE64   = Inhalt von:  base64 -w0 diabetesguard-release.keystore
+#   KEYSTORE_PASSWORD = Keystore-Passwort
+#   KEY_ALIAS         = diabetesguard
+#   KEY_PASSWORD      = Key-Passwort
+#
+# Optional – automatischer Upload in die Play Console (interner Test-Track):
+#   PLAY_SERVICE_ACCOUNT_JSON = Inhalt der Service-Account-JSON-Datei (siehe PLAY_STORE_GUIDE.md)
+name: Android Build
+
+on:
+  push:
+    branches: [main, master, "claude/**"]
+    paths: ["**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    env:
+      # 'true', sobald der Keystore als Secret hinterlegt ist
+      HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
+      HAS_PLAY_KEY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: package-lock.json }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: android-actions/setup-android@v3
+
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync android
+
+      - name: Debug-APK bauen
+        run: cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DiabetesGuard-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Keystore aus Secrets wiederherstellen
+        if: env.HAS_KEYSTORE == 'true'
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/release.keystore
+          cat > android/keystore.properties << PROPS
+          storeFile=release.keystore
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          PROPS
+
+      - name: Release-Bundle (.aab) bauen
+        if: env.HAS_KEYSTORE == 'true'
+        run: cd android && ./gradlew bundleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: env.HAS_KEYSTORE == 'true'
+        with:
+          name: DiabetesGuard-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+
+      - name: In Play Console hochladen (interner Test-Track)
+        if: env.HAS_KEYSTORE == 'true' && env.HAS_PLAY_KEY == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: de.diabetesguard.app
+          releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+          track: internal
+          status: completed
+          inAppUpdatePriority: 2
+
+      - name: Keystore aufräumen
+        if: always()
+        run: rm -f android/release.keystore android/keystore.properties
