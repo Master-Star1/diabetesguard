@@ -1,0 +1,69 @@
+# Trägt den Store-Eintrag (Titel, Kurz-/Langbeschreibung, Icon, Feature-Grafik, Screenshots)
+# automatisch in die Google Play Console ein – über die offizielle Google-Play-API (fastlane supply).
+#
+# • Texte:    fastlane/metadata/android/de-DE/*.txt
+# • Grafiken: store-listing/assets/ (werden beim Lauf kopiert)
+#
+# Läuft bei Änderungen an diesen Dateien (main und claude/**-Branches) – oder manuell:
+#   Actions → "Play Store Eintrag" → Run workflow
+#
+# Benötigtes Secret (Repo → Settings → Secrets and variables → Actions):
+#   PLAY_SERVICE_ACCOUNT_JSON = Inhalt der Service-Account-JSON-Datei (siehe PLAY_STORE_GUIDE.md)
+#   Das Dienstkonto braucht in der Play Console die Berechtigung „Store-Präsenz bearbeiten".
+#
+# Ohne Secret werden nur die Texte geprüft (Zeichenlimits), hochgeladen wird nichts.
+name: Play Store Eintrag
+
+on:
+  push:
+    branches: [main, master, "claude/**"]
+    paths:
+      - "fastlane/metadata/android/**"
+      - "store-listing/assets/**"
+      - "scripts/prepare-play-listing.sh"
+      - ".github/workflows/play-store-listing.yml"
+  workflow_dispatch:
+    inputs:
+      nur_pruefen:
+        description: "Nur prüfen, nichts in der Play Console ändern"
+        type: boolean
+        default: false
+
+concurrency: play-store-listing
+
+jobs:
+  listing:
+    runs-on: ubuntu-latest
+    env:
+      HAS_PLAY_KEY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Texte prüfen und Grafiken bereitstellen
+        run: scripts/prepare-play-listing.sh
+
+      - name: Hinweis – Secret fehlt
+        if: env.HAS_PLAY_KEY != 'true'
+        run: echo "::warning::PLAY_SERVICE_ACCOUNT_JSON ist nicht hinterlegt – es wurde nur geprüft, nichts hochgeladen."
+
+      - uses: ruby/setup-ruby@v1
+        if: env.HAS_PLAY_KEY == 'true'
+        with: { ruby-version: "3.3" }
+
+      - name: fastlane installieren
+        if: env.HAS_PLAY_KEY == 'true'
+        run: gem install fastlane --no-document
+
+      - name: Store-Eintrag in die Play Console übertragen
+        if: env.HAS_PLAY_KEY == 'true'
+        env:
+          SUPPLY_JSON_KEY_DATA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          VALIDATE_ONLY: ${{ inputs.nur_pruefen == true }}
+        run: |
+          fastlane supply \
+            --package_name de.diabetesguard.app \
+            --metadata_path fastlane/metadata/android \
+            --skip_upload_apk true \
+            --skip_upload_aab true \
+            --skip_upload_changelogs true \
+            --validate_only "$VALIDATE_ONLY"

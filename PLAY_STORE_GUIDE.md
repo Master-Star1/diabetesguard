@@ -118,6 +118,24 @@ Vorher die Platzhalter `[IHR NAME]`, `[ADRESSE]`, `[KONTAKT-E-MAIL]` in beiden D
 | Feature-Grafik 1024×500 | `store-listing/assets/feature-graphic-1024x500.png` |
 | 6 Smartphone-Screenshots 1080×1920 | `store-listing/assets/screenshot-0*.png` |
 
+### Store-Eintrag automatisch eintragen (GitHub Actions)
+
+Der Workflow `.github/workflows/play-store-listing.yml` überträgt Titel, Kurz- und
+Langbeschreibung, Icon, Feature-Grafik und die 6 Screenshots per Google-Play-API in die Console:
+
+1. App in der Play Console anlegen („App erstellen", Paketname `de.diabetesguard.app`,
+   Standardsprache Deutsch) und einmalig ein AAB manuell hochladen (siehe Schritt 3)
+2. Secret `PLAY_SERVICE_ACCOUNT_JSON` hinterlegen (siehe „Upload automatisieren" oben) – das
+   Dienstkonto braucht zusätzlich die Berechtigung **„Store-Präsenz bearbeiten"**
+3. GitHub → Actions → „Play Store Eintrag" → „Run workflow"
+
+Texte ändern: `fastlane/metadata/android/de-DE/*.txt` bearbeiten und pushen – der Workflow
+läuft dann von selbst. Ohne Secret prüft er nur die Zeichenlimits.
+
+**Weiterhin von Hand** (die API erlaubt das nicht): Kategorie, Kontakt-E-Mail,
+Datenschutz-URL und alle Formulare unter „App-Inhalte" (Datensicherheit, Einstufung,
+Zielgruppe, Gesundheit) – Antworten stehen in `store-listing/play-console-antworten.md`.
+
 Formuliere NIEMALS „erkennt Diabetes" – immer „schätzt Ihr Risiko ein". Die Texte beachten das.
 
 ---
