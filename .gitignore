@@ -29,3 +29,6 @@ android/build/
 android/.gradle/
 android/keystore.properties
 *.keystore
+
+# Von scripts/prepare-play-listing.sh aus store-listing/assets/ kopiert
+fastlane/metadata/android/*/images/

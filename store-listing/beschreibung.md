@@ -1,5 +1,8 @@
 # Store-Texte für Google Play (fertig zum Kopieren)
 
+> Die Texte, die der Workflow „Play Store Eintrag" automatisch hochlädt, liegen in
+> `fastlane/metadata/android/de-DE/`. Änderungen bitte **dort** vornehmen (und hier nachziehen).
+
 ## App-Name (max. 30 Zeichen)
 ```
 DiabetesGuard: Zucker-Tagebuch
